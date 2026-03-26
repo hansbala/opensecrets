@@ -1,11 +1,11 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
+	opkg "github.com/hansbala/opensecrets/pkg"
 	"github.com/stretchr/testify/require"
 )
 
@@ -71,40 +71,37 @@ func TestUnlockFolder(t *testing.T) {
 		folderPath := t.TempDir()
 		userConfigDir := t.TempDir()
 		password := "correct horse battery"
+		masterKeyManager := opkg.NewFilesystemMasterKeyManager(userConfigDir)
 
 		err := initFolder(folderPath, password)
 		require.NoError(t, err)
 
-		err = unlockFolder(folderPath, userConfigDir, password)
+		err = unlockFolder(folderPath, masterKeyManager, password)
 		require.NoError(t, err)
 
-		sessionFilePath := sessionPath(userConfigDir, folderPath)
+		sessionFilePath := opkg.SessionPathForFolder(userConfigDir, folderPath)
 		require.FileExists(t, sessionFilePath)
 
-		sessionContents, err := os.ReadFile(sessionFilePath)
+		masterKey, err := masterKeyManager.Load(folderPath)
 		require.NoError(t, err)
-
-		var state sessionState
-		err = json.Unmarshal(sessionContents, &state)
-		require.NoError(t, err)
-		require.Equal(t, folderPath, state.FolderPath)
-		require.NotEmpty(t, state.CreatedAt)
-		require.Len(t, state.MasterKey, cMasterKeyLen)
+		require.Len(t, masterKey, cMasterKeyLen)
 	})
 
 	t.Run("rejects wrong password", func(t *testing.T) {
 		folderPath := t.TempDir()
 		userConfigDir := t.TempDir()
+		masterKeyManager := opkg.NewFilesystemMasterKeyManager(userConfigDir)
 
 		err := initFolder(folderPath, "correct horse battery")
 		require.NoError(t, err)
 
-		err = unlockFolder(folderPath, userConfigDir, "wrong password")
-		require.EqualError(t, err, "unlock: invalid password")
+		err = unlockFolder(folderPath, masterKeyManager, "wrong password")
+		require.EqualError(t, err, "invalid password")
 	})
 
 	t.Run("rejects uninitialized folder", func(t *testing.T) {
-		err := unlockFolder(t.TempDir(), t.TempDir(), "correct horse battery")
+		masterKeyManager := opkg.NewFilesystemMasterKeyManager(t.TempDir())
+		err := unlockFolder(t.TempDir(), masterKeyManager, "correct horse battery")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "unlock: folder is not initialized")
 	})

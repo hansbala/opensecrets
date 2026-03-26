@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -12,8 +11,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
+	opkg "github.com/hansbala/opensecrets/pkg"
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/term"
@@ -37,8 +36,6 @@ const (
 	cArgonThreads    = 4
 	cKDFName         = "argon2id"
 	cCipherName      = "xchacha20poly1305"
-	cSessionDirName  = "sessions"
-	cSessionFileExt  = ".json"
 	cPasswordPrompt  = "Enter password to secure the vault: "
 	cPasswordConfirm = "Confirm password: "
 	cUnlockPrompt    = "Enter password to unlock vault: "
@@ -129,12 +126,6 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 
 type usageError struct {
 	msg string
-}
-
-type sessionState struct {
-	FolderPath string `json:"folder_path"`
-	CreatedAt  string `json:"created_at"`
-	MasterKey  []byte `json:"master_key"`
 }
 
 type masterKeyEnvelope struct {
@@ -237,9 +228,9 @@ func runUnlock(args []string) error {
 			return err
 		}
 
-		userConfigDir, err := os.UserConfigDir()
+		masterKeyManager, err := newMasterKeyManager()
 		if err != nil {
-			return fmt.Errorf("resolve user config directory: %w", err)
+			return err
 		}
 
 		password := ""
@@ -252,7 +243,7 @@ func runUnlock(args []string) error {
 			return err
 		}
 
-		err = unlockFolder(folderPath, userConfigDir, password)
+		err = unlockFolder(folderPath, masterKeyManager, password)
 		if err != nil {
 			return err
 		}
@@ -433,7 +424,7 @@ func findFolderRoot(startPath string) (string, error) {
 	}
 }
 
-func unlockFolder(folderPath string, userConfigDir string, password string) error {
+func unlockFolder(folderPath string, masterKeyManager opkg.MasterKeyManager, password string) error {
 	_, err := os.Stat(configPath(folderPath))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -452,22 +443,10 @@ func unlockFolder(folderPath string, userConfigDir string, password string) erro
 		return errors.New("invalid password")
 	}
 
-	sessionPath := sessionPath(userConfigDir, folderPath)
-	err = os.MkdirAll(filepath.Dir(sessionPath), cDirPerm)
+	// TODO: Replace this filesystem-backed master key manager with OS keyring storage.
+	err = masterKeyManager.Store(folderPath, masterKey)
 	if err != nil {
-		return fmt.Errorf("unlock: create session directory: %w", err)
-	}
-
-	state := sessionState{
-		FolderPath: folderPath,
-		CreatedAt:  time.Now().UTC().Format(time.RFC3339),
-		// TODO: Replace this on-disk plaintext-equivalent master key cache with OS keyring storage.
-		MasterKey: masterKey,
-	}
-
-	err = writeJSONFile(sessionPath, state, cFilePerm)
-	if err != nil {
-		return fmt.Errorf("unlock: write session state: %w", err)
+		return fmt.Errorf("unlock: store session master key: %w", err)
 	}
 
 	return nil
@@ -487,12 +466,6 @@ func configPath(folderPath string) string {
 
 func masterKeyPath(folderPath string) string {
 	return filepath.Join(storeRootPath(folderPath), cMasterKeyFile)
-}
-
-func sessionPath(userConfigDir string, folderPath string) string {
-	digest := sha256.Sum256([]byte(folderPath))
-	sessionName := fmt.Sprintf("%x%s", digest, cSessionFileExt)
-	return filepath.Join(userConfigDir, cToolName, cSessionDirName, sessionName)
 }
 
 func buildConfigContents() string {
@@ -668,6 +641,15 @@ func writeFileAtomically(path string, contents []byte, perm os.FileMode) error {
 	}
 
 	return os.Rename(tempPath, path)
+}
+
+func newMasterKeyManager() (opkg.MasterKeyManager, error) {
+	userConfigDir, err := os.UserConfigDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve user config directory: %w", err)
+	}
+
+	return opkg.NewFilesystemMasterKeyManager(userConfigDir), nil
 }
 
 func writeTopLevelUsage(w io.Writer) {

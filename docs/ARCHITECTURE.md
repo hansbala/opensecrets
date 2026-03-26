@@ -6,18 +6,18 @@ OpenSecrets protects files inside an arbitrary folder, not just a Git repository
 
 The core model is:
 
-- a protected workspace
+- a protected folder
 - an encrypted backing store
 - a local authenticated session
 
-If the workspace is later committed to Git, only the encrypted metadata and encrypted file contents should be tracked.
+If the folder is later committed to Git, only the encrypted metadata and encrypted file contents should be tracked.
 
-## Workspace Layout
+## Folder Layout
 
-Each protected workspace contains a hidden metadata directory:
+Each protected folder contains a hidden metadata directory:
 
 ```text
-<workspace>/
+<folder>/
   .opensecrets/
     config.toml
     masterkey.enc
@@ -28,17 +28,17 @@ Notes:
 
 - `.opensecrets/` is hidden by default to reduce clutter
 - the storage path should be configurable, but `.opensecrets/` is the default
-- the workspace config file lives at `.opensecrets/config.toml`
+- the folder config file lives at `.opensecrets/config.toml`
 
 ## Local State
 
 Passwords are not stored.
 
-OpenSecrets should keep workspace-portable data inside the workspace and machine-local session state outside the workspace.
+OpenSecrets should keep folder-portable data inside the folder and machine-local session state outside the folder.
 
 Recommended split:
 
-- workspace config and encrypted store: inside `.opensecrets/`
+- folder config and encrypted store: inside `.opensecrets/`
 - local session state: OS-specific user application data directory
 
 Examples:
@@ -48,7 +48,7 @@ Examples:
 
 Local session state should contain only session data, such as:
 
-- repo or workspace identifier
+- repo or folder identifier
 - unlocked path metadata
 - session expiry information
 - optional lock/PID metadata
@@ -96,9 +96,9 @@ opensecrets lock
 
 Semantics:
 
-- `init` initializes the workspace and prompts for a new password
+- `init` initializes the folder and prompts for a new password
 - `unlock` authenticates and starts a local session
-- `unlock <path>` decrypts files or directories into the workspace
+- `unlock <path>` decrypts files or directories into the folder
 - `lock <path>` encrypts files or directories back into the backing store and removes plaintext by default
 - `lock` with no path locks all tracked unlocked paths and clears the local session
 
@@ -144,6 +144,6 @@ Recommended dependencies:
 - `golang.org/x/term`
   For password prompts without terminal echo
 - a TOML library such as `github.com/pelletier/go-toml/v2`
-  For workspace config parsing and writing
+  For folder config parsing and writing
 
 The standard library should handle most of the remaining work.

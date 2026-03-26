@@ -11,6 +11,9 @@ The goal is to keep the code small, explicit, and easy to refactor as the design
 - follow standard Go formatting with `gofmt`
 - prefer the standard library unless an external dependency clearly earns its place
 - keep names short, direct, and domain-specific
+- prefix all constants with `c`
+- prefix variables that are intentionally used as constants with `c`
+- write explicit type annotations for each variable or parameter name instead of sharing one trailing type across multiple names
 - avoid clever abstractions in v0
 - write code that is easy to trace from CLI entrypoint to filesystem and crypto operations
 
@@ -53,8 +56,8 @@ The goal is to keep the code small, explicit, and easy to refactor as the design
 
 - use TOML for user-edited config
 - keep machine-generated state out of user-edited config files
-- keep workspace-portable config inside `.opensecrets/`
-- keep machine-local session state outside the workspace
+- keep folder-portable config inside `.opensecrets/`
+- keep machine-local session state outside the folder
 
 ## Testing Rules
 

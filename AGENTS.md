@@ -12,7 +12,7 @@ Primary docs:
 Current direction:
 
 - OpenSecrets protects files inside an arbitrary folder, not just a Git repository
-- each workspace uses a fixed hidden metadata directory at `.opensecrets/`
+- each protected folder uses a fixed hidden metadata directory at `.opensecrets/`
 - the CLI is intentionally small and session-based
 - encrypted storage should use opaque object identifiers and an encrypted index
 

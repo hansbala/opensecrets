@@ -23,19 +23,19 @@ This gives the user two concepts:
 
 ### `opensecrets init`
 
-Initializes OpenSecrets in the current repository.
+Initializes OpenSecrets in the current folder.
 
 Responsibilities:
 
-- create repo metadata under `.opensecrets/`
-- prompt the user for a password
+- create folder metadata under `.opensecrets/`
+- prompt the user to set and confirm a password
 - derive a wrapping key from that password
 - generate and store an encrypted master key
-- write repo config
+- write folder config
 
 Expected result:
 
-- the repo is ready to encrypt and decrypt tracked paths
+- the folder is ready to encrypt and decrypt tracked paths
 
 ### `opensecrets unlock`
 
@@ -44,8 +44,8 @@ Prompts for the password and starts a local authenticated session.
 Responsibilities:
 
 - derive the key-encryption key from the password
-- decrypt the repo master key
-- keep the master key in local session state
+- decrypt the folder master key
+- keep the decrypted master key in local session state
 
 Expected result:
 

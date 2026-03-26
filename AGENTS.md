@@ -8,6 +8,7 @@ Primary docs:
 - [Architecture](./docs/ARCHITECTURE.md)
 - [Go Rules](./docs/GO_RULES.md)
 - [Feature: Filename Privacy](./docs/features/FILENAME_PRIVACY.md)
+- [Roadmap: Safe Filesystem Cache](./docs/roadmap/safe-filesystem-cache.md)
 
 Current direction:
 

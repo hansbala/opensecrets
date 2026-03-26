@@ -27,8 +27,8 @@ Each protected folder contains a hidden metadata directory:
 Notes:
 
 - `.opensecrets/` is hidden by default to reduce clutter
-- the storage path should be configurable, but `.opensecrets/` is the default
 - the folder config file lives at `.opensecrets/config.toml`
+- the encrypted master key lives at `.opensecrets/masterkey.enc`
 
 ## Local State
 
@@ -69,6 +69,11 @@ Flow:
 2. `Argon2id` derives a key from the password and a salt.
 3. The derived key encrypts the master key.
 4. The master key encrypts file contents.
+
+Current implementation status:
+
+- `init` prompts for a password, generates a random master key, and stores an encrypted master key envelope in `.opensecrets/masterkey.enc`
+- bare `unlock` prompts for a password, decrypts the master key, and stores local session state outside the folder
 
 This keeps the UX simple while avoiding direct file encryption with the raw password.
 

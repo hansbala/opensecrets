@@ -13,3 +13,7 @@ link: build
 .PHONY: fmt
 fmt:
 	@gofmt -w main.go
+
+.PHONY: test
+test:
+	@$(GO_FLAGS) go test ./...

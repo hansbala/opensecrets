@@ -11,11 +11,15 @@ import (
 )
 
 const (
-	cToolName    = "opensecrets"
-	cStoreDir    = ".opensecrets"
-	cConfigFile  = "config.toml"
-	cExitUsage   = 2
-	cExitFailure = 1
+	cToolName      = "opensecrets"
+	cStoreDir      = ".opensecrets"
+	cStoreSubdir   = "store"
+	cConfigFile    = "config.toml"
+	cConfigVersion = 1
+	cDirPerm       = 0o700
+	cFilePerm      = 0o600
+	cExitUsage     = 2
+	cExitFailure   = 1
 )
 
 type command struct {
@@ -147,11 +151,17 @@ func runInit(args []string) error {
 		return fmt.Errorf("resolve current directory: %w", err)
 	}
 
-	return notImplemented(
-		"init",
-		fmt.Sprintf("folder=%s store-dir=%s", cwd, *storePath),
-		"will initialize the folder metadata and prompt for a password",
-	)
+	cleanStorePath, err := cleanStoreDir(*storePath)
+	if err != nil {
+		return err
+	}
+
+	err = initFolder(cwd, cleanStorePath)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func runUnlock(args []string) error {
@@ -256,6 +266,112 @@ func findCommand(name string) (command, bool) {
 
 func notImplemented(cmdName, details, next string) error {
 	return fmt.Errorf("%s: not implemented yet (%s); %s", cmdName, details, next)
+}
+
+func cleanStoreDir(storeDir string) (string, error) {
+	trimmedStoreDir := strings.TrimSpace(storeDir)
+	if trimmedStoreDir == "" {
+		return "", &usageError{msg: "store-dir must not be empty"}
+	}
+	if filepath.IsAbs(trimmedStoreDir) {
+		return "", &usageError{msg: "store-dir must be relative to the current folder"}
+	}
+
+	cleanStoreDir := filepath.Clean(trimmedStoreDir)
+	if cleanStoreDir == "." {
+		return "", &usageError{msg: "store-dir must not be the current folder"}
+	}
+
+	return cleanStoreDir, nil
+}
+
+func initFolder(folderPath string, storeDir string) error {
+	configPath := configPath(folderPath, storeDir)
+	_, err := os.Stat(configPath)
+	if err == nil {
+		return fmt.Errorf("init: folder already initialized at %s", configPath)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("init: stat config: %w", err)
+	}
+
+	storeRootPath := storeRootPath(folderPath, storeDir)
+	storeObjectsPath := storeObjectsPath(folderPath, storeDir)
+
+	err = os.MkdirAll(storeObjectsPath, cDirPerm)
+	if err != nil {
+		return fmt.Errorf("init: create metadata directories: %w", err)
+	}
+
+	configContents := buildConfigContents(storeDir)
+	err = writeFileAtomically(configPath, []byte(configContents), cFilePerm)
+	if err != nil {
+		return fmt.Errorf("init: write config: %w", err)
+	}
+
+	err = os.Chmod(storeRootPath, cDirPerm)
+	if err != nil {
+		return fmt.Errorf("init: set metadata permissions: %w", err)
+	}
+
+	err = os.Chmod(storeObjectsPath, cDirPerm)
+	if err != nil {
+		return fmt.Errorf("init: set store permissions: %w", err)
+	}
+
+	return nil
+}
+
+func storeRootPath(folderPath string, storeDir string) string {
+	return filepath.Join(folderPath, storeDir)
+}
+
+func storeObjectsPath(folderPath string, storeDir string) string {
+	return filepath.Join(storeRootPath(folderPath, storeDir), cStoreSubdir)
+}
+
+func configPath(folderPath string, storeDir string) string {
+	return filepath.Join(storeRootPath(folderPath, storeDir), cConfigFile)
+}
+
+func buildConfigContents(storeDir string) string {
+	return strings.Join([]string{
+		fmt.Sprintf("version = %d", cConfigVersion),
+		fmt.Sprintf("store_dir = %q", storeDir),
+		"",
+	}, "\n")
+}
+
+func writeFileAtomically(path string, contents []byte, perm os.FileMode) error {
+	parentDir := filepath.Dir(path)
+	tempFile, err := os.CreateTemp(parentDir, "opensecrets-*.tmp")
+	if err != nil {
+		return err
+	}
+
+	tempPath := tempFile.Name()
+	defer func() {
+		_ = os.Remove(tempPath)
+	}()
+
+	err = tempFile.Chmod(perm)
+	if err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+
+	_, err = tempFile.Write(contents)
+	if err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+
+	err = tempFile.Close()
+	if err != nil {
+		return err
+	}
+
+	return os.Rename(tempPath, path)
 }
 
 func writeTopLevelUsage(w io.Writer) {

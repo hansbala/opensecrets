@@ -15,7 +15,7 @@ func TestFilesystemIndexStore(t *testing.T) {
 
 	index, err := store.Load(folderPath, masterKey)
 	require.NoError(t, err)
-	require.Equal(t, cIndexVersion, index.Version)
+	require.Equal(t, cIndexVersion, index.FormatVersion)
 	require.Empty(t, index.Entries)
 
 	index.Entries["secrets/prod.env"] = IndexEntry{

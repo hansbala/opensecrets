@@ -204,3 +204,255 @@ func TestRunLockAndUnlockPath(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, originalContents, restoredContents)
 }
+
+func TestRunLockWithKeepAfterPath(t *testing.T) {
+	folderPath := t.TempDir()
+	userConfigDir := t.TempDir()
+	password := "correct horse battery"
+	filePath := filepath.Join(folderPath, "file1.txt")
+	err := os.WriteFile(filePath, []byte("hello"), 0o600)
+	require.NoError(t, err)
+
+	err = initFolder(folderPath, password)
+	require.NoError(t, err)
+
+	filesystemMasterKeyManager := opkg.NewFilesystemMasterKeyManager(userConfigDir)
+	err = unlockFolder(folderPath, filesystemMasterKeyManager, password)
+	require.NoError(t, err)
+
+	originalNewMasterKeyManager := cNewMasterKeyManager
+	originalNewVaultService := cNewVaultService
+	cNewMasterKeyManager = func() (opkg.MasterKeyManager, error) {
+		return filesystemMasterKeyManager, nil
+	}
+	cNewVaultService = func() (opkg.VaultService, error) {
+		return opkg.NewVaultService(
+			filesystemMasterKeyManager,
+			opkg.NewFilesystemIndexStore(),
+			opkg.NewFilesystemObjectStore(),
+		), nil
+	}
+	defer func() {
+		cNewMasterKeyManager = originalNewMasterKeyManager
+		cNewVaultService = originalNewVaultService
+	}()
+
+	originalWorkingDir, err := os.Getwd()
+	require.NoError(t, err)
+	err = os.Chdir(folderPath)
+	require.NoError(t, err)
+	defer func() {
+		_ = os.Chdir(originalWorkingDir)
+	}()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err = run([]string{"lock", "file1.txt", "--keep"}, &stdout, &stderr)
+	require.NoError(t, err)
+	require.FileExists(t, filePath)
+}
+
+func TestRunUnlockRefusesOverwriteWithoutForce(t *testing.T) {
+	folderPath := t.TempDir()
+	userConfigDir := t.TempDir()
+	password := "correct horse battery"
+	filePath := filepath.Join(folderPath, "file1.txt")
+	err := os.WriteFile(filePath, []byte("original"), 0o600)
+	require.NoError(t, err)
+
+	err = initFolder(folderPath, password)
+	require.NoError(t, err)
+
+	filesystemMasterKeyManager := opkg.NewFilesystemMasterKeyManager(userConfigDir)
+	err = unlockFolder(folderPath, filesystemMasterKeyManager, password)
+	require.NoError(t, err)
+
+	originalNewMasterKeyManager := cNewMasterKeyManager
+	originalNewVaultService := cNewVaultService
+	cNewMasterKeyManager = func() (opkg.MasterKeyManager, error) {
+		return filesystemMasterKeyManager, nil
+	}
+	cNewVaultService = func() (opkg.VaultService, error) {
+		return opkg.NewVaultService(
+			filesystemMasterKeyManager,
+			opkg.NewFilesystemIndexStore(),
+			opkg.NewFilesystemObjectStore(),
+		), nil
+	}
+	defer func() {
+		cNewMasterKeyManager = originalNewMasterKeyManager
+		cNewVaultService = originalNewVaultService
+	}()
+
+	originalWorkingDir, err := os.Getwd()
+	require.NoError(t, err)
+	err = os.Chdir(folderPath)
+	require.NoError(t, err)
+	defer func() {
+		_ = os.Chdir(originalWorkingDir)
+	}()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err = run([]string{"lock", "file1.txt", "--keep"}, &stdout, &stderr)
+	require.NoError(t, err)
+
+	err = os.WriteFile(filePath, []byte("local edit"), 0o600)
+	require.NoError(t, err)
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = run([]string{"unlock", "file1.txt"}, &stdout, &stderr)
+	require.EqualError(t, err, "unlock: file1.txt already exists. Pass --force to overwrite.")
+}
+
+func TestRunForceAfterPath(t *testing.T) {
+	folderPath := t.TempDir()
+	userConfigDir := t.TempDir()
+	password := "correct horse battery"
+	filePath := filepath.Join(folderPath, "file1.txt")
+	err := os.WriteFile(filePath, []byte("original"), 0o600)
+	require.NoError(t, err)
+
+	err = initFolder(folderPath, password)
+	require.NoError(t, err)
+
+	filesystemMasterKeyManager := opkg.NewFilesystemMasterKeyManager(userConfigDir)
+	err = unlockFolder(folderPath, filesystemMasterKeyManager, password)
+	require.NoError(t, err)
+
+	originalNewMasterKeyManager := cNewMasterKeyManager
+	originalNewVaultService := cNewVaultService
+	cNewMasterKeyManager = func() (opkg.MasterKeyManager, error) {
+		return filesystemMasterKeyManager, nil
+	}
+	cNewVaultService = func() (opkg.VaultService, error) {
+		return opkg.NewVaultService(
+			filesystemMasterKeyManager,
+			opkg.NewFilesystemIndexStore(),
+			opkg.NewFilesystemObjectStore(),
+		), nil
+	}
+	defer func() {
+		cNewMasterKeyManager = originalNewMasterKeyManager
+		cNewVaultService = originalNewVaultService
+	}()
+
+	originalWorkingDir, err := os.Getwd()
+	require.NoError(t, err)
+	err = os.Chdir(folderPath)
+	require.NoError(t, err)
+	defer func() {
+		_ = os.Chdir(originalWorkingDir)
+	}()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err = run([]string{"lock", "file1.txt", "--keep"}, &stdout, &stderr)
+	require.NoError(t, err)
+
+	err = os.WriteFile(filePath, []byte("updated"), 0o600)
+	require.NoError(t, err)
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = run([]string{"lock", "file1.txt", "--force", "--keep"}, &stdout, &stderr)
+	require.NoError(t, err)
+
+	err = os.WriteFile(filePath, []byte("local edit"), 0o600)
+	require.NoError(t, err)
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = run([]string{"unlock", "file1.txt", "--force"}, &stdout, &stderr)
+	require.NoError(t, err)
+
+	contents, err := os.ReadFile(filePath)
+	require.NoError(t, err)
+	require.Equal(t, []byte("updated"), contents)
+}
+
+func TestVersionOutput(t *testing.T) {
+	originalVersion := cVersion
+	cVersion = "test-version"
+	defer func() {
+		cVersion = originalVersion
+	}()
+
+	t.Run("version command", func(t *testing.T) {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+
+		err := run([]string{"version"}, &stdout, &stderr)
+		require.NoError(t, err)
+		require.Equal(t, "opensecrets test-version\n", stdout.String())
+		require.Empty(t, stderr.String())
+	})
+
+	t.Run("top level version flag", func(t *testing.T) {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+
+		err := run([]string{"--version"}, &stdout, &stderr)
+		require.NoError(t, err)
+		require.Equal(t, "opensecrets test-version\n", stdout.String())
+		require.Empty(t, stderr.String())
+	})
+}
+
+func TestRunList(t *testing.T) {
+	folderPath := t.TempDir()
+	userConfigDir := t.TempDir()
+	masterKey, err := randomBytes(32)
+	require.NoError(t, err)
+
+	err = initFolder(folderPath, "correct horse battery")
+	require.NoError(t, err)
+
+	filesystemMasterKeyManager := opkg.NewFilesystemMasterKeyManager(userConfigDir)
+	err = filesystemMasterKeyManager.Store(folderPath, masterKey)
+	require.NoError(t, err)
+
+	indexStore := opkg.NewFilesystemIndexStore()
+	err = indexStore.Save(folderPath, masterKey, &opkg.Index{
+		Entries: map[string]opkg.IndexEntry{
+			"z.txt": {ObjectID: "z"},
+			"a.txt": {ObjectID: "a"},
+		},
+	})
+	require.NoError(t, err)
+
+	originalNewVaultService := cNewVaultService
+	cNewVaultService = func() (opkg.VaultService, error) {
+		return opkg.NewVaultService(
+			filesystemMasterKeyManager,
+			indexStore,
+			opkg.NewFilesystemObjectStore(),
+		), nil
+	}
+	defer func() {
+		cNewVaultService = originalNewVaultService
+	}()
+
+	originalWorkingDir, err := os.Getwd()
+	require.NoError(t, err)
+	err = os.Chdir(folderPath)
+	require.NoError(t, err)
+	defer func() {
+		_ = os.Chdir(originalWorkingDir)
+	}()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err = run([]string{"ls"}, &stdout, &stderr)
+	require.NoError(t, err)
+	require.Equal(t, "a.txt\nz.txt\n", stdout.String())
+	require.Empty(t, stderr.String())
+}

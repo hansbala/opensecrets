@@ -49,6 +49,7 @@ type command struct {
 }
 
 var (
+	cVersion  = "dev"
 	cCommands = []command{
 		{
 			name:        "init",
@@ -69,10 +70,22 @@ var (
 			description: "With one or more paths, writes those files or directories back into the encrypted store. With no paths, locks all tracked plaintext and clears the local session.",
 		},
 		{
+			name:        "ls",
+			summary:     "List locked paths.",
+			usageLine:   "opensecrets ls",
+			description: "Prints the locked relative paths currently stored in the encrypted index.",
+		},
+		{
 			name:        "help",
 			summary:     "Show general or command-specific help.",
 			usageLine:   "opensecrets help [command]",
 			description: "Prints top-level help or detailed help for a single command.",
+		},
+		{
+			name:        "version",
+			summary:     "Show the current binary version.",
+			usageLine:   "opensecrets version",
+			description: "Prints the version bundled into the current OpenSecrets binary.",
 		},
 	}
 	cNewMasterKeyManager = newMasterKeyManager
@@ -104,6 +117,8 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	switch args[0] {
 	case "-h", "--help", "help":
 		return runHelp(args[1:])
+	case "--version":
+		return runVersion(args[1:], stdout)
 	}
 
 	cmd, ok := findCommand(args[0])
@@ -119,8 +134,12 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 		return runUnlock(args[1:])
 	case "lock":
 		return runLock(args[1:])
+	case "ls":
+		return runList(args[1:], stdout)
 	case "help":
 		return runHelp(args[1:])
+	case "version":
+		return runVersion(args[1:], stdout)
 	default:
 		return &usageError{msg: fmt.Sprintf("unknown command %q", cmd.name)}
 	}
@@ -160,9 +179,22 @@ func runHelp(args []string) error {
 	return nil
 }
 
+func runVersion(args []string, stdout io.Writer) error {
+	if len(args) != 0 {
+		return &usageError{msg: "version does not accept positional arguments"}
+	}
+
+	fmt.Fprintf(stdout, "%s %s\n", cToolName, cVersion)
+	return nil
+}
+
 func runInit(args []string) error {
 	cmd, _ := findCommand("init")
 	fs := newFlagSet(cmd)
+	args = normalizeBoolFlagArgs(args, map[string]bool{
+		"-h":     true,
+		"--help": true,
+	})
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -204,6 +236,13 @@ func runInit(args []string) error {
 func runUnlock(args []string) error {
 	cmd, _ := findCommand("unlock")
 	fs := newFlagSet(cmd)
+	args = normalizeBoolFlagArgs(args, map[string]bool{
+		"-h":               true,
+		"--help":           true,
+		"--password-stdin": true,
+		"--force":          true,
+	})
+	force := fs.Bool("force", false, "Overwrite conflicting plaintext when unlocking paths.")
 	passwordStdin := fs.Bool("password-stdin", false, "Read the password from stdin when starting a session.")
 
 	if err := fs.Parse(args); err != nil {
@@ -269,7 +308,7 @@ func runUnlock(args []string) error {
 		return err
 	}
 
-	err = vaultService.UnlockPaths(folderPath, paths)
+	err = vaultService.UnlockPaths(folderPath, paths, *force)
 	if err != nil {
 		return fmt.Errorf("unlock: %w", err)
 	}
@@ -282,6 +321,13 @@ func runUnlock(args []string) error {
 func runLock(args []string) error {
 	cmd, _ := findCommand("lock")
 	fs := newFlagSet(cmd)
+	args = normalizeBoolFlagArgs(args, map[string]bool{
+		"-h":      true,
+		"--help":  true,
+		"--keep":  true,
+		"--force": true,
+	})
+	force := fs.Bool("force", false, "Overwrite conflicting locked paths.")
 	keep := fs.Bool("keep", false, "Keep plaintext files after locking paths.")
 
 	if err := fs.Parse(args); err != nil {
@@ -337,12 +383,53 @@ func runLock(args []string) error {
 		return err
 	}
 
-	err = vaultService.LockPaths(folderPath, paths, *keep)
+	err = vaultService.LockPaths(folderPath, paths, *keep, *force)
 	if err != nil {
 		return fmt.Errorf("lock: %w", err)
 	}
 
 	fmt.Fprintf(os.Stdout, "Locked %s\n", strings.Join(paths, ", "))
+
+	return nil
+}
+
+func runList(args []string, stdout io.Writer) error {
+	cmd, _ := findCommand("ls")
+	fs := newFlagSet(cmd)
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() != 0 {
+		return &usageError{msg: "ls does not accept positional arguments"}
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolve current directory: %w", err)
+	}
+
+	folderPath, err := findFolderRoot(cwd)
+	if err != nil {
+		return err
+	}
+
+	vaultService, err := cNewVaultService()
+	if err != nil {
+		return err
+	}
+
+	paths, err := vaultService.ListPaths(folderPath)
+	if err != nil {
+		return fmt.Errorf("ls: %w", err)
+	}
+
+	for _, path := range paths {
+		fmt.Fprintln(stdout, path)
+	}
 
 	return nil
 }
@@ -369,6 +456,27 @@ func cleanPaths(paths []string) ([]string, error) {
 		out = append(out, filepath.Clean(path))
 	}
 	return out, nil
+}
+
+func normalizeBoolFlagArgs(args []string, supportedFlags map[string]bool) []string {
+	if len(args) == 0 {
+		return args
+	}
+
+	flags := make([]string, 0, len(args))
+	positionals := make([]string, 0, len(args))
+	for _, arg := range args {
+		if supportedFlags[arg] {
+			flags = append(flags, arg)
+			continue
+		}
+		positionals = append(positionals, arg)
+	}
+
+	out := make([]string, 0, len(args))
+	out = append(out, flags...)
+	out = append(out, positionals...)
+	return out
 }
 
 func formatPaths(paths []string) string {
@@ -522,7 +630,7 @@ func masterKeyPath(folderPath string) string {
 
 func buildConfigContents() string {
 	return strings.Join([]string{
-		fmt.Sprintf("version = %d", cConfigVersion),
+		fmt.Sprintf("format_version = %d", cConfigVersion),
 		fmt.Sprintf("kdf = %q", cKDFName),
 		fmt.Sprintf("cipher = %q", cCipherName),
 		"",
@@ -739,6 +847,8 @@ func writeTopLevelUsage(w io.Writer) {
 		fmt.Sprintf("  %s unlock secrets/prod.env", cToolName),
 		fmt.Sprintf("  %s lock secrets/prod.env", cToolName),
 		fmt.Sprintf("  %s lock", cToolName),
+		fmt.Sprintf("  %s ls", cToolName),
+		fmt.Sprintf("  %s version", cToolName),
 		"",
 		fmt.Sprintf("Use %q for more details.", cToolName+" help <command>"),
 	)
@@ -765,17 +875,19 @@ func writeCommandUsage(w io.Writer, cmd command) {
 		lines = append(lines,
 			"",
 			"Flags:",
+			"  --force             Overwrite conflicting plaintext when unlocking paths.",
 			"  --password-stdin    Read the password from stdin when starting a session.",
 			"",
 			"Examples:",
 			fmt.Sprintf("  %s unlock", cToolName),
 			fmt.Sprintf("  %s unlock secrets/", cToolName),
-			fmt.Sprintf("  %s unlock secrets/prod.env", cToolName),
+			fmt.Sprintf("  %s unlock secrets/prod.env --force", cToolName),
 		)
 	case "lock":
 		lines = append(lines,
 			"",
 			"Flags:",
+			"  --force             Overwrite an existing locked entry for a path.",
 			"  --keep              Keep plaintext files after locking paths.",
 			"",
 			"Examples:",
@@ -789,12 +901,19 @@ func writeCommandUsage(w io.Writer, cmd command) {
 			"Example:",
 			fmt.Sprintf("  %s help unlock", cToolName),
 		)
+	case "ls":
+		lines = append(lines,
+			"",
+			"Example:",
+			fmt.Sprintf("  %s ls", cToolName),
+		)
+	case "version":
+		lines = append(lines,
+			"",
+			"Example:",
+			fmt.Sprintf("  %s version", cToolName),
+		)
 	}
-
-	lines = append(lines,
-		"",
-		fmt.Sprintf("Folder metadata lives under %s/%s.", cStoreDir, cConfigFile),
-	)
 
 	writeLines(w, lines...)
 }

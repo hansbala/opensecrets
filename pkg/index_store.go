@@ -17,8 +17,8 @@ const (
 )
 
 type Index struct {
-	Version int
-	Entries map[string]IndexEntry
+	FormatVersion int
+	Entries       map[string]IndexEntry
 }
 
 type IndexEntry struct {
@@ -43,8 +43,8 @@ func (s FilesystemIndexStore) Load(folderPath string, masterKey []byte) (*Index,
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &Index{
-				Version: cIndexVersion,
-				Entries: map[string]IndexEntry{},
+				FormatVersion: cIndexVersion,
+				Entries:       map[string]IndexEntry{},
 			}, nil
 		}
 		return nil, err
@@ -68,8 +68,8 @@ func (s FilesystemIndexStore) Load(folderPath string, masterKey []byte) (*Index,
 }
 
 func (s FilesystemIndexStore) Save(folderPath string, masterKey []byte, index *Index) error {
-	if index.Version == 0 {
-		index.Version = cIndexVersion
+	if index.FormatVersion == 0 {
+		index.FormatVersion = cIndexVersion
 	}
 	if index.Entries == nil {
 		index.Entries = map[string]IndexEntry{}

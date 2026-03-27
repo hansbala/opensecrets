@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 type VaultService struct {
@@ -20,7 +21,7 @@ func NewVaultService(masterKeys MasterKeyManager, indexes IndexStore, objects Ob
 	}
 }
 
-func (s VaultService) LockPaths(folderPath string, paths []string, keep bool) error {
+func (s VaultService) LockPaths(folderPath string, paths []string, keep bool, force bool) error {
 	masterKey, err := s.MasterKeys.Load(folderPath)
 	if err != nil {
 		return err
@@ -43,7 +44,10 @@ func (s VaultService) LockPaths(folderPath string, paths []string, keep bool) er
 			return err
 		}
 		if info.IsDir() {
-			return fmt.Errorf("lock paths: directories are not implemented yet: %s", relativePath)
+			return fmt.Errorf("directories are not implemented yet: %s", relativePath)
+		}
+		if _, ok := index.Entries[relativePath]; ok && !force {
+			return fmt.Errorf("%s is already locked. Pass --force to overwrite.", relativePath)
 		}
 
 		plaintext, err := os.ReadFile(absolutePath)
@@ -73,7 +77,7 @@ func (s VaultService) LockPaths(folderPath string, paths []string, keep bool) er
 	return s.Indexes.Save(folderPath, masterKey, index)
 }
 
-func (s VaultService) UnlockPaths(folderPath string, paths []string) error {
+func (s VaultService) UnlockPaths(folderPath string, paths []string, force bool) error {
 	masterKey, err := s.MasterKeys.Load(folderPath)
 	if err != nil {
 		return err
@@ -92,7 +96,7 @@ func (s VaultService) UnlockPaths(folderPath string, paths []string) error {
 
 		entry, ok := index.Entries[relativePath]
 		if !ok {
-			return fmt.Errorf("unlock paths: path is not locked: %s", relativePath)
+			return fmt.Errorf("%s is not locked.", relativePath)
 		}
 
 		plaintext, err := s.Objects.Get(folderPath, masterKey, entry.ObjectID)
@@ -101,6 +105,14 @@ func (s VaultService) UnlockPaths(folderPath string, paths []string) error {
 		}
 
 		absolutePath := filepath.Join(folderPath, relativePath)
+		_, err = os.Stat(absolutePath)
+		if err == nil && !force {
+			return fmt.Errorf("%s already exists. Pass --force to overwrite.", relativePath)
+		}
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+
 		err = os.MkdirAll(filepath.Dir(absolutePath), cDirPerm)
 		if err != nil {
 			return err
@@ -113,6 +125,26 @@ func (s VaultService) UnlockPaths(folderPath string, paths []string) error {
 	}
 
 	return nil
+}
+
+func (s VaultService) ListPaths(folderPath string) ([]string, error) {
+	masterKey, err := s.MasterKeys.Load(folderPath)
+	if err != nil {
+		return nil, err
+	}
+
+	index, err := s.Indexes.Load(folderPath, masterKey)
+	if err != nil {
+		return nil, err
+	}
+
+	paths := make([]string, 0, len(index.Entries))
+	for path := range index.Entries {
+		paths = append(paths, path)
+	}
+
+	sort.Strings(paths)
+	return paths, nil
 }
 
 func normalizeRelativePath(folderPath string, path string) (string, error) {

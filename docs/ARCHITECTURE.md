@@ -29,6 +29,7 @@ Notes:
 - `.opensecrets/` is hidden by default to reduce clutter
 - the folder config file lives at `.opensecrets/config.toml`
 - the encrypted master key lives at `.opensecrets/masterkey.enc`
+- on-disk metadata should use `format_version`, which is separate from the binary semantic version
 
 ## Local State
 

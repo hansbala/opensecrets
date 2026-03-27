@@ -80,8 +80,8 @@ Responsibilities:
 
 Default safety rules:
 
-- do not overwrite encrypted state silently if it changed since the path was unlocked
-- fail on divergence unless `--force` is passed
+- do not overwrite an existing locked entry for the path silently
+- require `--force` to replace the existing locked entry
 
 ### `opensecrets lock`
 

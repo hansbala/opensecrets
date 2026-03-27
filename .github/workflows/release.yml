@@ -89,14 +89,42 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
 
+      - name: Generate release notes
+        id: notes
+        env:
+          CURRENT_TAG: ${{ github.ref_name }}
+        run: |
+          PREVIOUS_TAG="$(git tag --sort=version:refname | grep -vx "${CURRENT_TAG}" | tail -n 1 || true)"
+          BODY_PATH="${RUNNER_TEMP}/release-notes.md"
+
+          {
+            echo "## Changes"
+            echo
+
+            if [ -n "${PREVIOUS_TAG}" ]; then
+              git log --pretty=format:'- %s' "${PREVIOUS_TAG}..${CURRENT_TAG}"
+            else
+              git log --pretty=format:'- %s' "${CURRENT_TAG}"
+            fi
+
+            echo
+          } > "${BODY_PATH}"
+
+          echo "body_path=${BODY_PATH}" >> "${GITHUB_OUTPUT}"
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: ${{ steps.notes.outputs.body_path }}
           files: dist/opensecrets_*

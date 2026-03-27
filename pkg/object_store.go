@@ -3,6 +3,7 @@ package opensecrets
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -47,7 +48,12 @@ func (s FilesystemObjectStore) Get(folderPath string, masterKey []byte, objectID
 		return nil, err
 	}
 
-	return decryptBytes(masterKey, ciphertext)
+	plaintext, err := decryptBytes(masterKey, ciphertext)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt object %s: %w", objectID, err)
+	}
+
+	return plaintext, nil
 }
 
 func (s FilesystemObjectStore) Delete(folderPath string, objectID string) error {

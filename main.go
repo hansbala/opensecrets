@@ -75,6 +75,8 @@ var (
 			description: "Prints top-level help or detailed help for a single command.",
 		},
 	}
+	cNewMasterKeyManager = newMasterKeyManager
+	cNewVaultService     = newVaultService
 )
 
 func main() {
@@ -202,7 +204,6 @@ func runInit(args []string) error {
 func runUnlock(args []string) error {
 	cmd, _ := findCommand("unlock")
 	fs := newFlagSet(cmd)
-	force := fs.Bool("force", false, "Overwrite conflicting plaintext when unlocking paths.")
 	passwordStdin := fs.Bool("password-stdin", false, "Read the password from stdin when starting a session.")
 
 	if err := fs.Parse(args); err != nil {
@@ -228,7 +229,7 @@ func runUnlock(args []string) error {
 			return err
 		}
 
-		masterKeyManager, err := newMasterKeyManager()
+		masterKeyManager, err := cNewMasterKeyManager()
 		if err != nil {
 			return err
 		}
@@ -253,22 +254,34 @@ func runUnlock(args []string) error {
 		return nil
 	}
 
-	mode := "session"
-	if len(paths) > 0 {
-		mode = "paths"
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolve current directory: %w", err)
 	}
 
-	return notImplemented(
-		"unlock",
-		fmt.Sprintf("mode=%s force=%t password-stdin=%t paths=%s", mode, *force, *passwordStdin, formatPaths(paths)),
-		"will start a session or unlock the requested files and directories",
-	)
+	folderPath, err := findFolderRoot(cwd)
+	if err != nil {
+		return err
+	}
+
+	vaultService, err := cNewVaultService()
+	if err != nil {
+		return err
+	}
+
+	err = vaultService.UnlockPaths(folderPath, paths)
+	if err != nil {
+		return fmt.Errorf("unlock: %w", err)
+	}
+
+	fmt.Fprintf(os.Stdout, "Unlocked %s\n", strings.Join(paths, ", "))
+
+	return nil
 }
 
 func runLock(args []string) error {
 	cmd, _ := findCommand("lock")
 	fs := newFlagSet(cmd)
-	force := fs.Bool("force", false, "Override divergence checks when locking paths.")
 	keep := fs.Bool("keep", false, "Keep plaintext files after locking paths.")
 
 	if err := fs.Parse(args); err != nil {
@@ -294,7 +307,7 @@ func runLock(args []string) error {
 			return err
 		}
 
-		masterKeyManager, err := newMasterKeyManager()
+		masterKeyManager, err := cNewMasterKeyManager()
 		if err != nil {
 			return err
 		}
@@ -309,16 +322,29 @@ func runLock(args []string) error {
 		return nil
 	}
 
-	mode := "session"
-	if len(paths) > 0 {
-		mode = "paths"
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolve current directory: %w", err)
 	}
 
-	return notImplemented(
-		"lock",
-		fmt.Sprintf("mode=%s force=%t keep=%t paths=%s", mode, *force, *keep, formatPaths(paths)),
-		"will lock the requested files or close the active session",
-	)
+	folderPath, err := findFolderRoot(cwd)
+	if err != nil {
+		return err
+	}
+
+	vaultService, err := cNewVaultService()
+	if err != nil {
+		return err
+	}
+
+	err = vaultService.LockPaths(folderPath, paths, *keep)
+	if err != nil {
+		return fmt.Errorf("lock: %w", err)
+	}
+
+	fmt.Fprintf(os.Stdout, "Locked %s\n", strings.Join(paths, ", "))
+
+	return nil
 }
 
 func newFlagSet(cmd command) *flag.FlagSet {
@@ -678,6 +704,19 @@ func newMasterKeyManager() (opkg.MasterKeyManager, error) {
 	return opkg.NewFilesystemMasterKeyManager(userConfigDir), nil
 }
 
+func newVaultService() (opkg.VaultService, error) {
+	masterKeyManager, err := newMasterKeyManager()
+	if err != nil {
+		return opkg.VaultService{}, err
+	}
+
+	return opkg.NewVaultService(
+		masterKeyManager,
+		opkg.NewFilesystemIndexStore(),
+		opkg.NewFilesystemObjectStore(),
+	), nil
+}
+
 func writeTopLevelUsage(w io.Writer) {
 	lines := []string{
 		"Bulletproof secrets in the open.",
@@ -726,19 +765,17 @@ func writeCommandUsage(w io.Writer, cmd command) {
 		lines = append(lines,
 			"",
 			"Flags:",
-			"  --force             Overwrite conflicting plaintext when unlocking paths.",
 			"  --password-stdin    Read the password from stdin when starting a session.",
 			"",
 			"Examples:",
 			fmt.Sprintf("  %s unlock", cToolName),
 			fmt.Sprintf("  %s unlock secrets/", cToolName),
-			fmt.Sprintf("  %s unlock secrets/prod.env --force", cToolName),
+			fmt.Sprintf("  %s unlock secrets/prod.env", cToolName),
 		)
 	case "lock":
 		lines = append(lines,
 			"",
 			"Flags:",
-			"  --force             Override divergence checks when locking paths.",
 			"  --keep              Keep plaintext files after locking paths.",
 			"",
 			"Examples:",

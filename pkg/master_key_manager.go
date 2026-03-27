@@ -43,7 +43,12 @@ func NewFilesystemMasterKeyManager(userConfigDir string) MasterKeyManager {
 
 // SessionPathForFolder returns the filesystem session path used for a folder.
 func SessionPathForFolder(userConfigDir string, folderPath string) string {
-	digest := sha256.Sum256([]byte(folderPath))
+	cleanFolderPath := filepath.Clean(folderPath)
+	resolvedFolderPath, err := filepath.EvalSymlinks(cleanFolderPath)
+	if err == nil {
+		cleanFolderPath = resolvedFolderPath
+	}
+	digest := sha256.Sum256([]byte(cleanFolderPath))
 	sessionName := fmt.Sprintf("%x%s", digest, cSessionFileExt)
 	return filepath.Join(userConfigDir, cToolName, cSessionDirName, sessionName)
 }

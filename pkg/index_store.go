@@ -2,6 +2,7 @@ package opensecrets
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -51,7 +52,7 @@ func (s FilesystemIndexStore) Load(folderPath string, masterKey []byte) (*Index,
 
 	plaintext, err := decryptBytes(masterKey, contents)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decrypt index: %w", err)
 	}
 
 	var index Index

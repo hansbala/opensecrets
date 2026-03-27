@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -139,4 +140,67 @@ func TestFilesystemSessionLifecycle(t *testing.T) {
 		err := masterKeyManager.Clear(folderPath)
 		require.NoError(t, err)
 	})
+}
+
+func TestRunLockAndUnlockPath(t *testing.T) {
+	folderPath := t.TempDir()
+	userConfigDir := t.TempDir()
+	password := "correct horse battery"
+	filePath := filepath.Join(folderPath, "secrets", "prod.env")
+	err := os.MkdirAll(filepath.Dir(filePath), cDirPerm)
+	require.NoError(t, err)
+
+	originalContents := []byte("API_KEY=secret")
+	err = os.WriteFile(filePath, originalContents, 0o600)
+	require.NoError(t, err)
+
+	err = initFolder(folderPath, password)
+	require.NoError(t, err)
+
+	filesystemMasterKeyManager := opkg.NewFilesystemMasterKeyManager(userConfigDir)
+
+	originalNewMasterKeyManager := cNewMasterKeyManager
+	originalNewVaultService := cNewVaultService
+	cNewMasterKeyManager = func() (opkg.MasterKeyManager, error) {
+		return filesystemMasterKeyManager, nil
+	}
+	cNewVaultService = func() (opkg.VaultService, error) {
+		return opkg.NewVaultService(
+			filesystemMasterKeyManager,
+			opkg.NewFilesystemIndexStore(),
+			opkg.NewFilesystemObjectStore(),
+		), nil
+	}
+	defer func() {
+		cNewMasterKeyManager = originalNewMasterKeyManager
+		cNewVaultService = originalNewVaultService
+	}()
+
+	originalWorkingDir, err := os.Getwd()
+	require.NoError(t, err)
+	err = os.Chdir(folderPath)
+	require.NoError(t, err)
+	defer func() {
+		_ = os.Chdir(originalWorkingDir)
+	}()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err = unlockFolder(folderPath, filesystemMasterKeyManager, password)
+	require.NoError(t, err)
+
+	err = run([]string{"lock", "secrets/prod.env"}, &stdout, &stderr)
+	require.NoError(t, err)
+	require.NoFileExists(t, filePath)
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = run([]string{"unlock", "secrets/prod.env"}, &stdout, &stderr)
+	require.NoError(t, err)
+
+	restoredContents, err := os.ReadFile(filePath)
+	require.NoError(t, err)
+	require.Equal(t, originalContents, restoredContents)
 }

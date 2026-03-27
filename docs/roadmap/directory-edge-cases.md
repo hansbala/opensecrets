@@ -14,6 +14,14 @@ Only files are indexed and stored.
 
 If a directory tree contains an empty directory, locking and unlocking the tree will not recreate that empty directory.
 
+This is now an intentional product decision, not an open problem.
+
+Reason:
+
+- Git does not track empty directories natively
+- OpenSecrets is designed around file-backed encrypted storage
+- preserving empty directories would require explicit directory markers with limited practical value for the Git-oriented workflow
+
 ### Directory metadata is not preserved
 
 OpenSecrets recreates parent directories as needed during unlock, but it does not currently preserve:
@@ -62,9 +70,8 @@ Priority order:
 
 1. define failure semantics for partial directory operations
 2. add orphaned object cleanup or at least orphan tracking
-3. decide whether empty directories should be preserved
-4. define and document symlink behavior explicitly
-5. improve UX for large directory trees
+3. define and document symlink behavior explicitly
+4. improve UX for large directory trees
 
 ## Acceptance Criteria
 
@@ -73,5 +80,5 @@ This area is in a better state when:
 - directory failure behavior is explicitly documented
 - partial failures do not leave surprising silent state
 - object lifecycle is managed more cleanly
-- empty-directory behavior is a deliberate product decision
+- empty-directory behavior remains an explicit non-goal unless product requirements change
 - symlink handling is explicit and tested

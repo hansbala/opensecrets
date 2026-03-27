@@ -1,6 +1,6 @@
 BINDIR ?= /usr/local/bin
 BIN_NAME := opensecrets
-VERSION ?= dev
+VERSION ?= $(shell cat VERSION)
 GO_FLAGS := CGO_ENABLED=0
 
 .PHONY: build

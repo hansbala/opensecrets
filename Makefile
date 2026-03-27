@@ -12,7 +12,7 @@ link: build
 
 .PHONY: fmt
 fmt:
-	@gofmt -w main.go
+	@gofmt -w main.go main_test.go pkg/*.go
 
 .PHONY: test
 test:

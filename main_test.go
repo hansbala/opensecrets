@@ -106,3 +106,37 @@ func TestUnlockFolder(t *testing.T) {
 		require.Contains(t, err.Error(), "unlock: folder is not initialized")
 	})
 }
+
+func TestFilesystemSessionLifecycle(t *testing.T) {
+	t.Run("clear removes stored master key", func(t *testing.T) {
+		userConfigDir := t.TempDir()
+		folderPath := t.TempDir()
+		password := "correct horse battery"
+		masterKeyManager := opkg.NewFilesystemMasterKeyManager(userConfigDir)
+
+		err := initFolder(folderPath, password)
+		require.NoError(t, err)
+
+		err = unlockFolder(folderPath, masterKeyManager, password)
+		require.NoError(t, err)
+
+		_, err = masterKeyManager.Load(folderPath)
+		require.NoError(t, err)
+
+		err = masterKeyManager.Clear(folderPath)
+		require.NoError(t, err)
+
+		_, err = masterKeyManager.Load(folderPath)
+		require.Error(t, err)
+		require.True(t, os.IsNotExist(err))
+	})
+
+	t.Run("clear is safe when no session exists", func(t *testing.T) {
+		userConfigDir := t.TempDir()
+		folderPath := t.TempDir()
+		masterKeyManager := opkg.NewFilesystemMasterKeyManager(userConfigDir)
+
+		err := masterKeyManager.Clear(folderPath)
+		require.NoError(t, err)
+	})
+}

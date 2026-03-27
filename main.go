@@ -283,6 +283,32 @@ func runLock(args []string) error {
 		return err
 	}
 
+	if len(paths) == 0 {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("resolve current directory: %w", err)
+		}
+
+		folderPath, err := findFolderRoot(cwd)
+		if err != nil {
+			return err
+		}
+
+		masterKeyManager, err := newMasterKeyManager()
+		if err != nil {
+			return err
+		}
+
+		err = masterKeyManager.Clear(folderPath)
+		if err != nil {
+			return fmt.Errorf("lock: clear session master key: %w", err)
+		}
+
+		fmt.Fprintf(os.Stdout, "Locked %s\n", folderPath)
+
+		return nil
+	}
+
 	mode := "session"
 	if len(paths) > 0 {
 		mode = "paths"

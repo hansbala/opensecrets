@@ -1,10 +1,12 @@
 package opensecrets
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 type VaultService struct {
@@ -32,19 +34,16 @@ func (s VaultService) LockPaths(folderPath string, paths []string, keep bool, fo
 		return err
 	}
 
-	for _, path := range paths {
-		relativePath, err := normalizeRelativePath(folderPath, path)
-		if err != nil {
-			return err
-		}
+	lockablePaths, err := expandLockPaths(folderPath, paths)
+	if err != nil {
+		return err
+	}
 
+	for _, relativePath := range lockablePaths {
 		absolutePath := filepath.Join(folderPath, relativePath)
 		info, err := os.Stat(absolutePath)
 		if err != nil {
 			return err
-		}
-		if info.IsDir() {
-			return fmt.Errorf("directories are not implemented yet: %s", relativePath)
 		}
 		if _, ok := index.Entries[relativePath]; ok && !force {
 			return fmt.Errorf("%s is already locked. Pass --force to overwrite.", relativePath)
@@ -71,6 +70,11 @@ func (s VaultService) LockPaths(folderPath string, paths []string, keep bool, fo
 			if err != nil {
 				return err
 			}
+
+			err = pruneEmptyParentDirs(folderPath, relativePath)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -88,16 +92,13 @@ func (s VaultService) UnlockPaths(folderPath string, paths []string, force bool)
 		return err
 	}
 
-	for _, path := range paths {
-		relativePath, err := normalizeRelativePath(folderPath, path)
-		if err != nil {
-			return err
-		}
+	unlockablePaths, err := expandUnlockPaths(folderPath, index, paths)
+	if err != nil {
+		return err
+	}
 
-		entry, ok := index.Entries[relativePath]
-		if !ok {
-			return fmt.Errorf("%s is not locked.", relativePath)
-		}
+	for _, relativePath := range unlockablePaths {
+		entry := index.Entries[relativePath]
 
 		plaintext, err := s.Objects.Get(folderPath, masterKey, entry.ObjectID)
 		if err != nil {
@@ -145,6 +146,123 @@ func (s VaultService) ListPaths(folderPath string) ([]string, error) {
 
 	sort.Strings(paths)
 	return paths, nil
+}
+
+func expandLockPaths(folderPath string, paths []string) ([]string, error) {
+	out := make([]string, 0)
+	seen := map[string]bool{}
+
+	for _, path := range paths {
+		relativePath, err := normalizeRelativePath(folderPath, path)
+		if err != nil {
+			return nil, err
+		}
+
+		absolutePath := filepath.Join(folderPath, relativePath)
+		info, err := os.Stat(absolutePath)
+		if err != nil {
+			return nil, err
+		}
+
+		if !info.IsDir() {
+			if !seen[relativePath] {
+				out = append(out, relativePath)
+				seen[relativePath] = true
+			}
+			continue
+		}
+
+		err = filepath.WalkDir(absolutePath, func(currentPath string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+
+			currentRelativePath, err := filepath.Rel(folderPath, currentPath)
+			if err != nil {
+				return err
+			}
+			currentRelativePath = filepath.Clean(currentRelativePath)
+			if !seen[currentRelativePath] {
+				out = append(out, currentRelativePath)
+				seen[currentRelativePath] = true
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	sort.Strings(out)
+	return out, nil
+}
+
+func expandUnlockPaths(folderPath string, index *Index, paths []string) ([]string, error) {
+	out := make([]string, 0)
+	seen := map[string]bool{}
+
+	for _, path := range paths {
+		relativePath, err := normalizeRelativePath(folderPath, path)
+		if err != nil {
+			return nil, err
+		}
+
+		if _, ok := index.Entries[relativePath]; ok {
+			if !seen[relativePath] {
+				out = append(out, relativePath)
+				seen[relativePath] = true
+			}
+			continue
+		}
+
+		prefix := relativePath + string(filepath.Separator)
+		matched := false
+		for indexedPath := range index.Entries {
+			if strings.HasPrefix(indexedPath, prefix) {
+				if !seen[indexedPath] {
+					out = append(out, indexedPath)
+					seen[indexedPath] = true
+				}
+				matched = true
+			}
+		}
+		if !matched {
+			return nil, fmt.Errorf("%s is not locked.", relativePath)
+		}
+	}
+
+	sort.Strings(out)
+	return out, nil
+}
+
+func pruneEmptyParentDirs(folderPath string, relativePath string) error {
+	currentPath := filepath.Dir(filepath.Join(folderPath, relativePath))
+	cleanFolderPath := filepath.Clean(folderPath)
+
+	for currentPath != cleanFolderPath && currentPath != "." {
+		err := os.Remove(currentPath)
+		if err == nil {
+			currentPath = filepath.Dir(currentPath)
+			continue
+		}
+		if os.IsNotExist(err) {
+			currentPath = filepath.Dir(currentPath)
+			continue
+		}
+		if isDirectoryNotEmptyError(err) {
+			return nil
+		}
+		return err
+	}
+
+	return nil
+}
+
+func isDirectoryNotEmptyError(err error) bool {
+	return errors.Is(err, os.ErrExist) || strings.Contains(err.Error(), "directory not empty")
 }
 
 func normalizeRelativePath(folderPath string, path string) (string, error) {

@@ -456,3 +456,123 @@ func TestRunList(t *testing.T) {
 	require.Equal(t, "a.txt\nz.txt\n", stdout.String())
 	require.Empty(t, stderr.String())
 }
+
+func TestRunLockAndUnlockDirectory(t *testing.T) {
+	folderPath := t.TempDir()
+	userConfigDir := t.TempDir()
+	password := "correct horse battery"
+	fileOnePath := filepath.Join(folderPath, "docs", "a.txt")
+	fileTwoPath := filepath.Join(folderPath, "docs", "nested", "b.txt")
+	err := os.MkdirAll(filepath.Dir(fileTwoPath), cDirPerm)
+	require.NoError(t, err)
+
+	err = os.WriteFile(fileOnePath, []byte("a"), 0o600)
+	require.NoError(t, err)
+	err = os.WriteFile(fileTwoPath, []byte("b"), 0o600)
+	require.NoError(t, err)
+
+	err = initFolder(folderPath, password)
+	require.NoError(t, err)
+
+	filesystemMasterKeyManager := opkg.NewFilesystemMasterKeyManager(userConfigDir)
+	err = unlockFolder(folderPath, filesystemMasterKeyManager, password)
+	require.NoError(t, err)
+
+	originalNewMasterKeyManager := cNewMasterKeyManager
+	originalNewVaultService := cNewVaultService
+	cNewMasterKeyManager = func() (opkg.MasterKeyManager, error) {
+		return filesystemMasterKeyManager, nil
+	}
+	cNewVaultService = func() (opkg.VaultService, error) {
+		return opkg.NewVaultService(
+			filesystemMasterKeyManager,
+			opkg.NewFilesystemIndexStore(),
+			opkg.NewFilesystemObjectStore(),
+		), nil
+	}
+	defer func() {
+		cNewMasterKeyManager = originalNewMasterKeyManager
+		cNewVaultService = originalNewVaultService
+	}()
+
+	originalWorkingDir, err := os.Getwd()
+	require.NoError(t, err)
+	err = os.Chdir(folderPath)
+	require.NoError(t, err)
+	defer func() {
+		_ = os.Chdir(originalWorkingDir)
+	}()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err = run([]string{"lock", "docs"}, &stdout, &stderr)
+	require.NoError(t, err)
+	require.NoFileExists(t, fileOnePath)
+	require.NoFileExists(t, fileTwoPath)
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = run([]string{"unlock", "docs"}, &stdout, &stderr)
+	require.NoError(t, err)
+
+	fileOneContents, err := os.ReadFile(fileOnePath)
+	require.NoError(t, err)
+	require.Equal(t, []byte("a"), fileOneContents)
+
+	fileTwoContents, err := os.ReadFile(fileTwoPath)
+	require.NoError(t, err)
+	require.Equal(t, []byte("b"), fileTwoContents)
+}
+
+func TestRunLockDirectoryPrunesEmptyDirs(t *testing.T) {
+	folderPath := t.TempDir()
+	userConfigDir := t.TempDir()
+	password := "correct horse battery"
+	filePath := filepath.Join(folderPath, "test_dir", "nested", "file.txt")
+	err := os.MkdirAll(filepath.Dir(filePath), cDirPerm)
+	require.NoError(t, err)
+
+	err = os.WriteFile(filePath, []byte("hello"), 0o600)
+	require.NoError(t, err)
+
+	err = initFolder(folderPath, password)
+	require.NoError(t, err)
+
+	filesystemMasterKeyManager := opkg.NewFilesystemMasterKeyManager(userConfigDir)
+	err = unlockFolder(folderPath, filesystemMasterKeyManager, password)
+	require.NoError(t, err)
+
+	originalNewMasterKeyManager := cNewMasterKeyManager
+	originalNewVaultService := cNewVaultService
+	cNewMasterKeyManager = func() (opkg.MasterKeyManager, error) {
+		return filesystemMasterKeyManager, nil
+	}
+	cNewVaultService = func() (opkg.VaultService, error) {
+		return opkg.NewVaultService(
+			filesystemMasterKeyManager,
+			opkg.NewFilesystemIndexStore(),
+			opkg.NewFilesystemObjectStore(),
+		), nil
+	}
+	defer func() {
+		cNewMasterKeyManager = originalNewMasterKeyManager
+		cNewVaultService = originalNewVaultService
+	}()
+
+	originalWorkingDir, err := os.Getwd()
+	require.NoError(t, err)
+	err = os.Chdir(folderPath)
+	require.NoError(t, err)
+	defer func() {
+		_ = os.Chdir(originalWorkingDir)
+	}()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err = run([]string{"lock", "test_dir"}, &stdout, &stderr)
+	require.NoError(t, err)
+	require.NoDirExists(t, filepath.Join(folderPath, "test_dir"))
+}

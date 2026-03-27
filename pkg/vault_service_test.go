@@ -173,4 +173,80 @@ func TestVaultService(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []byte("original"), contents)
 	})
+
+	t.Run("locks and unlocks a directory recursively", func(t *testing.T) {
+		folderPath := t.TempDir()
+		userConfigDir := t.TempDir()
+		fileOnePath := filepath.Join(folderPath, "docs", "a.txt")
+		fileTwoPath := filepath.Join(folderPath, "docs", "nested", "b.txt")
+		err := os.MkdirAll(filepath.Dir(fileTwoPath), cDirPerm)
+		require.NoError(t, err)
+
+		err = os.WriteFile(fileOnePath, []byte("a"), 0o600)
+		require.NoError(t, err)
+		err = os.WriteFile(fileTwoPath, []byte("b"), 0o600)
+		require.NoError(t, err)
+
+		masterKey, err := randomBytes(32)
+		require.NoError(t, err)
+
+		masterKeys := NewFilesystemMasterKeyManager(userConfigDir)
+		err = masterKeys.Store(folderPath, masterKey)
+		require.NoError(t, err)
+
+		service := NewVaultService(
+			masterKeys,
+			NewFilesystemIndexStore(),
+			NewFilesystemObjectStore(),
+		)
+
+		err = service.LockPaths(folderPath, []string{"docs"}, false, false)
+		require.NoError(t, err)
+		require.NoFileExists(t, fileOnePath)
+		require.NoFileExists(t, fileTwoPath)
+
+		index, err := NewFilesystemIndexStore().Load(folderPath, masterKey)
+		require.NoError(t, err)
+		require.Contains(t, index.Entries, "docs/a.txt")
+		require.Contains(t, index.Entries, "docs/nested/b.txt")
+
+		err = service.UnlockPaths(folderPath, []string{"docs"}, false)
+		require.NoError(t, err)
+
+		fileOneContents, err := os.ReadFile(fileOnePath)
+		require.NoError(t, err)
+		require.Equal(t, []byte("a"), fileOneContents)
+
+		fileTwoContents, err := os.ReadFile(fileTwoPath)
+		require.NoError(t, err)
+		require.Equal(t, []byte("b"), fileTwoContents)
+	})
+
+	t.Run("prunes empty directories after locking a directory", func(t *testing.T) {
+		folderPath := t.TempDir()
+		userConfigDir := t.TempDir()
+		filePath := filepath.Join(folderPath, "test_dir", "nested", "file.txt")
+		err := os.MkdirAll(filepath.Dir(filePath), cDirPerm)
+		require.NoError(t, err)
+
+		err = os.WriteFile(filePath, []byte("hello"), 0o600)
+		require.NoError(t, err)
+
+		masterKey, err := randomBytes(32)
+		require.NoError(t, err)
+
+		masterKeys := NewFilesystemMasterKeyManager(userConfigDir)
+		err = masterKeys.Store(folderPath, masterKey)
+		require.NoError(t, err)
+
+		service := NewVaultService(
+			masterKeys,
+			NewFilesystemIndexStore(),
+			NewFilesystemObjectStore(),
+		)
+
+		err = service.LockPaths(folderPath, []string{"test_dir"}, false, false)
+		require.NoError(t, err)
+		require.NoDirExists(t, filepath.Join(folderPath, "test_dir"))
+	})
 }

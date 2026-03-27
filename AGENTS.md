@@ -9,6 +9,7 @@ Primary docs:
 - [Go Rules](./docs/GO_RULES.md)
 - [Feature: Filename Privacy](./docs/features/FILENAME_PRIVACY.md)
 - [Roadmap: Safe Filesystem Cache](./docs/roadmap/safe-filesystem-cache.md)
+- [Roadmap: Directory Edge Cases](./docs/roadmap/directory-edge-cases.md)
 
 Current direction:
 
